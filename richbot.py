@@ -1,3 +1,4 @@
+
 import os, re, logging
 import aiohttp
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -63,14 +64,17 @@ def _has_slideshow_candidate(text: str) -> bool:
     return False
 
 def _wrap_slideshow(text: str) -> str:
-    """Wraps consecutive media groups in <tg-slideshow> tags."""
+    """Wraps consecutive media groups in <tg-slideshow> with --- dividers."""
     def _md(m):
-        return f'<tg-slideshow>\n\n{m.group(0).strip()}\n\n</tg-slideshow>'
+        return f'\n---\n\n<tg-slideshow>\n\n{m.group(0).strip()}\n\n</tg-slideshow>\n\n---'
     text = _CONSEC_MD.sub(_md, text)
 
     def _html(m):
-        return f'<tg-slideshow>\n{m.group(0).strip()}\n</tg-slideshow>'
+        return f'\n---\n\n<tg-slideshow>\n{m.group(0).strip()}\n</tg-slideshow>\n\n---'
     text = re.sub(r'((?:<(?:img|video|audio)\b[^>]*/?\s*>\s*){2,})', _html, text, flags=re.I)
+
+    # Collapse any duplicate adjacent dividers (e.g. user already had --- before/after)
+    text = re.sub(r'---[ \t]*(\n\s*---[ \t]*)+', '---', text)
     return text
 
 # ── Core send ───────────────────────────────────────────────────────────────
