@@ -50,7 +50,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "• Any markdown text\n"
         "• An .md or .html file\n"
         "I'll resend it as a Telegram Rich Message.\n\n"
-        "Force mode: /md <text>  or  /html <text>"
+        "Force mode: /md <text>  or  /html <text>\n\n"
+        "Repo: https://github.com/devgaganin/RichTextBot/"
     )
 
 async def _send_and_reply(update: Update, text: str, mode: str = None):
