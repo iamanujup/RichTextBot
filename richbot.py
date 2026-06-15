@@ -1,4 +1,3 @@
-
 import os, re, logging
 import aiohttp
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -77,7 +76,48 @@ def _wrap_slideshow(text: str) -> str:
     text = re.sub(r'---[ \t]*(\n\s*---[ \t]*)+', '---', text)
     return text
 
-# ── Core send ───────────────────────────────────────────────────────────────
+# ── Rich content detection ──────────────────────────────────────────────────
+# Only process messages that actually contain formatting worth rendering.
+# Plain "okay bhai", "haan", etc. → silently skip.
+
+_HTML_TAG = re.compile(
+    r'<(?:b|i|u|s|em|strong|code|pre|mark|h[1-6]|p|ul|ol|li|table|tr|td|th|'
+    r'blockquote|details|summary|figure|figcaption|aside|sup|sub|hr|br|div|span|'
+    r'tg-spoiler|tg-math|tg-math-block|tg-slideshow|tg-collage|tg-map|'
+    r'img|video|audio)[\s/>]',
+    re.I
+)
+
+_MD_PATTERNS = [
+    re.compile(r'^#{1,6}\s',          re.M),   # ## heading
+    re.compile(r'\*\*.+?\*\*',        re.S),   # **bold**
+    re.compile(r'__.+?__',            re.S),   # __bold__
+    re.compile(r'\*.+?\*'),                    # *italic*
+    re.compile(r'~~.+?~~'),                    # ~~strikethrough~~
+    re.compile(r'==.+?=='),                    # ==marked==
+    re.compile(r'\|\|.+?\|\|'),                # ||spoiler||
+    re.compile(r'^\|.+\|',            re.M),   # | table |
+    re.compile(r'!\[.*?\]\([^)]+\)'),          # ![image](url)
+    re.compile(r'\[.+?\]\([^)]+\)'),           # [link](url)
+    re.compile(r'\$\$.+?\$\$',        re.S),   # $$block math$$
+    re.compile(r'\$.+?\$'),                    # $inline math$
+    re.compile(r'^```',               re.M),   # ```code block
+    re.compile(r'`[^`]+`'),                    # `inline code`
+    re.compile(r'^>[ \t]',            re.M),   # > blockquote
+    re.compile(r'^---$',              re.M),   # --- divider
+    re.compile(r'^\s*[-*]\s+\[[ x]\]',re.M),  # - [ ] task list
+    re.compile(r'^\s*[-*+]\s+\S',    re.M),   # - unordered list
+    re.compile(r'^\s*\d+\.\s+\S',    re.M),   # 1. ordered list
+    re.compile(r'\[\^.+?\]'),                  # [^footnote]
+]
+
+def _is_rich_content(text: str) -> bool:
+    """True only if text has actual markdown/HTML formatting elements."""
+    if _HTML_TAG.search(text):
+        return True
+    return any(p.search(text) for p in _MD_PATTERNS)
+
+
 
 def _detect_mode(text: str) -> str:
     return "html" if text.lstrip().startswith("<") else "markdown"
@@ -163,7 +203,43 @@ def _msg(update: Update):
 
 # ── Handlers ────────────────────────────────────────────────────────────────
 
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+# ── Admin toggle helpers ────────────────────────────────────────────────────
+
+async def _is_admin(bot, chat_id: int, user_id: int) -> bool:
+    try:
+        m = await bot.get_chat_member(chat_id, user_id)
+        return m.status in ("administrator", "creator")
+    except Exception:
+        return False
+
+def _disabled(ctx: ContextTypes.DEFAULT_TYPE, chat_id: int) -> bool:
+    return chat_id in ctx.bot_data.get("off", set())
+
+async def cmd_richoff(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    m = _msg(update)
+    if not m:
+        return
+    is_channel = m.chat.type == "channel"
+    uid = m.from_user.id if m.from_user else None
+    if not is_channel and (not uid or not await _is_admin(ctx.bot, m.chat_id, uid)):
+        await m.reply_text("❌ Only admins can use this.")
+        return
+    ctx.bot_data.setdefault("off", set()).add(m.chat_id)
+    await m.reply_text("🔴 RichTextBot disabled for this chat. Use /richon to resume.")
+
+async def cmd_richon(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    m = _msg(update)
+    if not m:
+        return
+    is_channel = m.chat.type == "channel"
+    uid = m.from_user.id if m.from_user else None
+    if not is_channel and (not uid or not await _is_admin(ctx.bot, m.chat_id, uid)):
+        await m.reply_text("❌ Only admins can use this.")
+        return
+    ctx.bot_data.get("off", set()).discard(m.chat_id)
+    await m.reply_text("🟢 RichTextBot enabled for this chat.")
+
+
     m = _msg(update)
     if m:
         await m.reply_text(
@@ -179,9 +255,11 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     m = _msg(update)
     if not m:
         return
-    text = (m.text or "").strip()
-    if not text:
+    if _disabled(ctx, m.chat_id):
         return
+    text = (m.text or "").strip()
+    if not text or not _is_rich_content(text):
+        return   # plain conversation — silently ignore
     await ctx.bot.send_chat_action(m.chat_id, ChatAction.TYPING,
                                    message_thread_id=getattr(m, "message_thread_id", None))
     await _process(ctx.bot, m.chat_id, text, _detect_mode(text),
@@ -190,6 +268,8 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def handle_doc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     m = _msg(update)
     if not m or not m.document:
+        return
+    if _disabled(ctx, m.chat_id):
         return
     name = (m.document.file_name or "").lower()
     if not (name.endswith(".md") or name.endswith(".html") or name.endswith(".txt")):
@@ -228,9 +308,11 @@ async def cmd_html(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("md",    cmd_md))
-    app.add_handler(CommandHandler("html",  cmd_html))
+    app.add_handler(CommandHandler("start",   cmd_start))
+    app.add_handler(CommandHandler("md",      cmd_md))
+    app.add_handler(CommandHandler("html",    cmd_html))
+    app.add_handler(CommandHandler("richoff", cmd_richoff))
+    app.add_handler(CommandHandler("richon",  cmd_richon))
 
     chan = filters.UpdateType.CHANNEL_POSTS
     doc  = filters.Document.ALL
