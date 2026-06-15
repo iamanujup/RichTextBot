@@ -40,18 +40,24 @@ async def try_delete(bot, chat_id: int, msg_id: int):
 
 # ── Slideshow detection & wrapping ─────────────────────────────────────────
 
-_MD_IMG   = re.compile(r'^!\[.*?\]\([^)]+\)\s*$')
-_HAS_SS   = re.compile(r'<tg-slideshow', re.I)
+_HAS_SS = re.compile(r'<tg-slideshow', re.I)
+
+# 2+ markdown image lines separated ONLY by blank lines (no other content between)
+# Handles: ![](url1)\n\n![](url2)  and  ![](url1)\n![](url2)
+_CONSEC_MD = re.compile(
+    r'!\[.*?\]\([^)]+\)'             # first image tag
+    r'(?:[ \t]*\n(?:[ \t]*\n)*'      # newline + optional blank lines
+    r'!\[.*?\]\([^)]+\))+',           # next image tag, 1+ times
+    re.MULTILINE
+)
 
 def _has_slideshow_candidate(text: str) -> bool:
-    """True if 2+ consecutive media lines exist NOT already in <tg-slideshow>."""
+    """True if 2+ consecutive media items (blank lines allowed between) not in <tg-slideshow>."""
     if _HAS_SS.search(text):
         return False
-    # Markdown: 2+ image lines in same paragraph block
-    for block in re.split(r'\n\s*\n', text):
-        if sum(1 for l in block.splitlines() if _MD_IMG.match(l.strip())) >= 2:
-            return True
-    # HTML: two consecutive media tags
+    if _CONSEC_MD.search(text):
+        return True
+    # HTML: consecutive media tags
     if re.search(r'<(?:img|video|audio)\b[^>]*/?\s*>\s*<(?:img|video|audio)\b', text, re.I):
         return True
     return False
@@ -60,7 +66,7 @@ def _wrap_slideshow(text: str) -> str:
     """Wraps consecutive media groups in <tg-slideshow> tags."""
     def _md(m):
         return f'<tg-slideshow>\n\n{m.group(0).strip()}\n\n</tg-slideshow>'
-    text = re.sub(r'((?:!\[.*?\]\([^)]+\)[ \t]*\n?){2,})', _md, text)
+    text = _CONSEC_MD.sub(_md, text)
 
     def _html(m):
         return f'<tg-slideshow>\n{m.group(0).strip()}\n</tg-slideshow>'
