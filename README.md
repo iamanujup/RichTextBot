@@ -1,6 +1,6 @@
-# RichTextBot 🚀
+# RichTextBot 
 
-A Telegram bot that renders Markdown and HTML as native **Telegram Rich Messages** (Bot API 10.1).  
+A Telegram bot ([try it](https://t.me/richtextprobot)) that renders Markdown and HTML as native **Telegram Rich Messages** (Bot API 10.1).  
 Send any `.md` file, `.html` file, or paste raw text — the bot resends it as a fully rendered rich message with tables, LaTeX, headings, collapsibles, and more.
 
 ---
