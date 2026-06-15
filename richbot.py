@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 TG_API    = f"https://api.telegram.org/bot{BOT_TOKEN}"
-REPO      = "https://github.com/devgaganin/RichTextBot"
+REPO      = "https://github.com/iamanujup/RichTextBot"
 
 # ── HTTP helpers ────────────────────────────────────────────────────────────
 
